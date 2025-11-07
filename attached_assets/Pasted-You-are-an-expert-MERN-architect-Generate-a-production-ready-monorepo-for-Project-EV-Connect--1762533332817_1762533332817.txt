@@ -1,0 +1,172 @@
+You are an expert MERN architect. Generate a production-ready monorepo for:
+
+Project: EV Connect — A Social & Utility Platform for Electric Vehicle Users
+Stack: MongoDB + Mongoose, Express.js, Node.js, React (Vite), TypeScript end-to-end, Tailwind CSS, JWT auth, Zod validation, Cloudinary for media, Google Maps JS API OR Open Charge Map API integration. Use pnpm workspaces.
+
+Top goals
+- Social hub: user profiles, posts, comments, likes, image/video uploads (Cloudinary), communities (by model/brand/region).
+- Utilities: map to locate nearby EV charging stations; bookmark stations & posts; Q&A forum; knowledge hub (models, reviews, govt schemes); EV news feed; tips for battery health & eco driving.
+- Roles: USER, MODERATOR, ADMIN with role-based access control (RBAC).
+- Admin console: manage users, posts, communities, reports; verify stations; publish news & knowledge articles; content flags & takedowns; analytics dashboard.
+- Non-functional: clean architecture, modular services, pagination, search, rate limiting, input validation, secure headers, CORS, request logging, error handling, .env driven config, unit/integration tests, seed data, Docker, GitHub Actions.
+
+Repo layout
+- /apps
+  - /server (Express, Mongoose, REST)
+  - /web (React + Vite + Tailwind, React Router, React Query)
+- /packages
+  - /ui (reusable components)
+  - /config (ESLint, TS, Tailwind presets)
+  - /types (shared TypeScript types)
+  - /utils (shared helpers)
+- Root: pnpm-workspace.yaml, turbo.json (or simple scripts), Dockerfiles, docker-compose.yml
+
+Environment (.env examples)
+SERVER: 
+  MONGO_URI=
+  JWT_SECRET=
+  CLOUDINARY_CLOUD_NAME=
+  CLOUDINARY_API_KEY=
+  CLOUDINARY_API_SECRET=
+  OPENCHARGEMAP_API_KEY= (optional)
+  GOOGLE_MAPS_API_KEY= (optional)
+  CLIENT_ORIGIN=http://localhost:5173
+  NODE_ENV=development
+WEB:
+  VITE_API_BASE_URL=http://localhost:4000/api
+  VITE_GOOGLE_MAPS_API_KEY=
+  VITE_OPENCHARGEMAP_API_KEY=
+  VITE_CLOUDINARY_CLOUD_NAME=
+  VITE_CLOUDINARY_UPLOAD_PRESET= (unsigned preset supported)
+
+Data models (Mongoose)
+- User { _id, email, passwordHash, role: 'USER'|'MODERATOR'|'ADMIN', status:'ACTIVE'|'SUSPENDED', createdAt }
+- Profile { userId, displayName, avatarUrl, bio, location {lat,lng, city,state,country}, vehicle {brand, model, year, batteryCapacity}, interests: [string] }
+- Community { name, slug, type:'MODEL'|'BRAND'|'REGION', coverImageUrl, description, moderators:[userId], membersCount }
+- Post { authorId, communityId?, text, media:[{type:'image'|'video', url}], likes:[userId], commentsCount, visibility:'PUBLIC'|'COMMUNITY', createdAt }
+- Comment { postId, authorId, text, createdAt }
+- Station { externalId?, name, coords{lat,lng}, address, connectors:[{type,powerKW}], provider, pricing?, availability?, verified:boolean, addedBy?, bookmarksCount }
+- Bookmark { userId, targetType:'POST'|'STATION', targetId, createdAt }
+- Question { authorId, title, body, tags:[string], upvotes:[userId], answersCount, solvedAnswerId?, createdAt }
+- Answer { questionId, authorId, body, upvotes:[userId], createdAt }
+- Article { kind:'NEWS'|'KNOWLEDGE'|'TIP', title, summary, body, coverImageUrl?, tags:[string], publishedAt, authorId (admin) }
+- Report { reporterId, targetType:'POST'|'COMMENT'|'USER', targetId, reason, status:'OPEN'|'RESOLVED'|'DISMISSED', handledBy?, createdAt }
+- Notification { userId, type, data, read:boolean, createdAt }
+- AuditLog { action, actorId, targetType, targetId, metadata, createdAt }
+
+API (REST, versioned under /api)
+Auth & Users
+- POST /auth/register (email+password, Zod validation) 
+- POST /auth/login (JWT), POST /auth/logout, GET /auth/me
+- GET /users/:id, PATCH /users/:id (self), PATCH /admin/users/:id (admin)
+Profiles
+- GET /profiles/:userId, PATCH /profiles/:userId
+Media (Cloudinary)
+- POST /media/sign (server-side signature for signed uploads, optional)
+- POST /media/upload (proxy option) => returns secure_url, public_id
+Communities
+- GET /communities?search=&type=
+- POST /communities (admin/mod), POST /communities/:id/join, POST /communities/:id/leave
+Posts & Comments
+- GET /posts?communityId=&feed=following|trending&page=&limit=
+- POST /posts, GET /posts/:id, DELETE /posts/:id (owner/mod/admin)
+- POST /posts/:id/like, DELETE /posts/:id/like
+- GET /posts/:id/comments, POST /posts/:id/comments
+Q&A
+- GET /questions?tag=&sort=
+- POST /questions, GET /questions/:id, POST /questions/:id/answers
+- POST /questions/:id/upvote, POST /answers/:id/upvote
+Bookmarks
+- GET /bookmarks, POST /bookmarks (targetType,targetId), DELETE /bookmarks/:id
+Stations & Maps
+- GET /stations/near?lat=&lng=&radiusKm= (fallback to Open Charge Map proxy)
+- GET /stations/:id
+- POST /stations (user submit), PATCH /stations/:id/verify (admin)
+News & Knowledge
+- GET /articles?kind=&tag=
+- POST /admin/articles (admin create/publish)
+Reports & Moderation
+- POST /reports, GET /admin/reports, PATCH /admin/reports/:id
+Admin
+- GET /admin/overview (counts, charts), GET /admin/logs
+
+Server architecture
+- src/
+  - index.ts (Express app)
+  - config/ (env, db, cloudinary, rate-limit, cors)
+  - middleware/ (authJWT, requireRole, errorHandler, validate)
+  - routes/ (modular routers per domain)
+  - controllers/
+  - services/ (StationService integrates Open Charge Map & caching)
+  - models/
+  - utils/
+  - tests/ (Jest + supertest)
+- Use Helmet, morgan, express-rate-limit, compression.
+- RBAC middleware: requireRole(['ADMIN']) etc.
+- Cloudinary SDK: signed uploads for posts/avatars; store secure_url + public_id.
+- StationService:
+  - If GOOGLE_MAPS_API_KEY present, use Places/Geocoding for maps display.
+  - If OPENCHARGEMAP_API_KEY present, proxy to https://api.openchargemap.io/ for /stations/near (cache results in Redis or in-memory LRU as fallback).
+- Pagination pattern: limit=, page=; return {items, page, totalPages, total}.
+
+Web (React + Vite + TS + Tailwind)
+- Routing (React Router) with public/private layouts.
+- State/data fetching: React Query.
+- Auth: JWT stored in httpOnly cookie; use /auth/me to hydrate user.
+- Pages
+  Public: Login, Register, Explore (posts + communities), Articles (news/knowledge), Station Finder (map), Q&A list & detail.
+  User: Home Feed, Create Post, My Profile & Edit, Bookmarks, My Questions, Submit Station.
+  Community: Community page (about, posts, members, join/leave).
+  Q&A: Ask Question, Question Detail (answers, accept, votes).
+  Admin: Dashboard, Users, Communities, Reports, Articles CMS, Stations Verify, Audit Logs.
+- Components
+  - PostCard, PostComposer (Cloudinary upload widget or custom uploader)
+  - CommentList
+  - StationMap (Map wrapper) with markers, info windows, “bookmark” and “navigate” actions
+  - StationSearchBar (radius, connector type, power)
+  - CommunityCard, JoinButton
+  - QA components (QuestionCard, AnswerCard, TagChips)
+  - ArticleCard, RichEditor (TipTap or simple textarea)
+  - Admin tables with filters, pagination, bulk actions
+- Map integration
+  - If GOOGLE_MAPS_API_KEY: load Maps JS API, render markers; geolocate with browser API.
+  - Else: use Leaflet + OpenStreetMap tiles for UI and fetch station data from Open Charge Map proxy.
+- Theming: Tailwind with a small design system in /packages/ui; responsive and accessible.
+
+Security & quality
+- Input validation: Zod schemas for all DTOs (both client and server).
+- Sanitization for posts/comments/questions.
+- Rate limit on auth and write endpoints.
+- Unit tests (models/services) + API tests (auth, posts, stations).
+- Basic e2e script to create demo data.
+
+Dev experience
+- Scripts:
+  - pnpm dev (concurrently run web at :5173 and server at :4000)
+  - pnpm test, pnpm lint, pnpm format
+  - pnpm seed (create demo users: admin@ev.com / Admin@123, user@ev.com / User@123; sample posts, questions, stations)
+- Docker:
+  - docker-compose up for MongoDB + server + web
+- GitHub Actions:
+  - CI: install, lint, test; build web & server.
+
+Acceptance criteria
+- Users can register/login, edit profile, follow/join communities, create posts with images (Cloudinary), comment, like.
+- Users can search stations on a map centered on their location, view details, and bookmark a station.
+- Q&A flow works (ask, answer, upvote, accept solution).
+- Admin can verify stations, moderate content, resolve reports, publish articles.
+- Knowledge hub/news lists and details render, with admin CMS.
+- Bookmarks page shows saved posts & stations.
+- All list endpoints support pagination & search.
+- Basic tests pass and seed script populates demo data.
+- Clear README with setup steps and .env samples.
+
+Deliverables
+- Full monorepo with code scaffolding, configs, and example implementations.
+- README.md including:
+  1) Prereqs (Node LTS, pnpm, Mongo)
+  2) Environment variable setup (server & web)
+  3) Cloudinary setup (how to create an unsigned upload preset + signed upload option)
+  4) Maps/OCM setup
+  5) Dev commands, seed data, admin login
+  6) Docker & CI usage
