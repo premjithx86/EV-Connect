@@ -51,8 +51,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       return res.json({ 
-        user: { id: user.id, email: user.email, role: user.role },
-        token 
+        user: { id: user.id, email: user.email, role: user.role }
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -92,8 +91,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       return res.json({ 
-        user: { id: user.id, email: user.email, role: user.role },
-        token 
+        user: { id: user.id, email: user.email, role: user.role }
       });
     } catch (error) {
       if (error instanceof z.ZodError) {

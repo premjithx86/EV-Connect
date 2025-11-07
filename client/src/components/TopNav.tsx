@@ -17,6 +17,7 @@ interface TopNavProps {
   userAvatar?: string;
   userName?: string;
   notificationCount?: number;
+  onLogout?: () => void;
 }
 
 export function TopNav({
@@ -24,6 +25,7 @@ export function TopNav({
   userAvatar,
   userName = "User",
   notificationCount = 0,
+  onLogout,
 }: TopNavProps) {
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -84,7 +86,9 @@ export function TopNav({
               <DropdownMenuItem>Settings</DropdownMenuItem>
               <DropdownMenuItem>My Bookmarks</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>Log out</DropdownMenuItem>
+              <DropdownMenuItem onClick={onLogout} data-testid="button-logout">
+                Log out
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

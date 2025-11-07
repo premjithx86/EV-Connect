@@ -4,7 +4,12 @@ import bcrypt from "bcrypt";
 import { storage } from "./storage";
 import type { User } from "@shared/schema";
 
-const JWT_SECRET = process.env.SESSION_SECRET || "dev-secret-change-in-production";
+// Require SESSION_SECRET in production
+if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
+  throw new Error("SESSION_SECRET environment variable is required in production");
+}
+
+const JWT_SECRET = process.env.SESSION_SECRET || "dev-secret-only-for-local-development";
 const TOKEN_EXPIRY = "7d";
 
 export interface AuthRequest extends Request {
