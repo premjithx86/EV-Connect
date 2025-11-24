@@ -1,8 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
-import { storage } from "./storage";
 import type { User } from "@shared/schema";
+import type { IStorage } from "./storage";
 
 // Require SESSION_SECRET in production
 if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
@@ -37,38 +37,105 @@ export function verifyToken(token: string): { userId: string } | null {
   }
 }
 
-export async function authenticateToken(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : req.cookies?.token;
+export function createAuthenticateToken(storage: IStorage) {
+  return async function authenticateToken(
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    console.log("[Auth] ===== Authentication Check =====");
+    console.log("[Auth] URL:", req.url);
+    console.log("[Auth] Method:", req.method);
+    console.log("[Auth] Session ID:", req.sessionID);
+    console.log("[Auth] Session userId:", req.session.userId);
+    console.log("[Auth] Cookies:", req.cookies);
+    console.log("[Auth] Headers cookie:", req.headers.cookie);
+    
+    const userId = req.session.userId;
 
-  if (!token) {
-    res.status(401).json({ error: "Authentication required" });
-    return;
-  }
+    if (!userId) {
+      console.log("[Auth] ❌ No userId in session - returning 401");
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
 
-  const decoded = verifyToken(token);
-  if (!decoded) {
-    res.status(401).json({ error: "Invalid or expired token" });
-    return;
-  }
+    console.log("[Auth] 🔍 Looking up user with ID:", userId);
+    
+    try {
+      const user = await storage.getUser(userId);
+      console.log("[Auth] User lookup result:", user ? `✅ Found: ${user.email} (ID: ${user.id})` : "❌ Not found");
+      
+      if (!user) {
+        console.log("[Auth] ❌ User not found in database - returning 401");
+        res.status(401).json({ error: "User not found" });
+        return;
+      }
 
-  const user = await storage.getUser(decoded.userId);
-  if (!user) {
-    res.status(401).json({ error: "User not found" });
-    return;
-  }
+      if (user.status !== "ACTIVE") {
+        console.log("[Auth] ❌ User account not active - returning 403");
+        res.status(403).json({ error: "Account is not active" });
+        return;
+      }
 
-  if (user.status !== "ACTIVE") {
-    res.status(403).json({ error: "Account is not active" });
-    return;
-  }
+      console.log("[Auth] ✅ Authentication successful for:", user.email);
+      req.user = user;
+      next();
+    } catch (error) {
+      console.error("[Auth] ❌ Error during user lookup:", error);
+      res.status(500).json({ error: "Authentication error" });
+    }
+  };
+}
 
-  req.user = user;
-  next();
+export function createEnsureNotBlocked(storage: IStorage) {
+  return function ensureNotBlocked(
+    getTargetUserId: (req: AuthRequest) => string | undefined | Promise<string | undefined>
+  ) {
+    return async function ensureNotBlockedMiddleware(
+      req: AuthRequest,
+      res: Response,
+      next: NextFunction
+    ): Promise<void> {
+      if (!req.user) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+
+      try {
+        const targetUserId = await getTargetUserId(req);
+
+        if (!targetUserId) {
+          res.status(400).json({ error: "Target user is required" });
+          return;
+        }
+
+        if (targetUserId === req.user.id) {
+          next();
+          return;
+        }
+
+        const [blockedByRequester, blockedByTarget] = await Promise.all([
+          storage.isBlocked(req.user.id, targetUserId),
+          storage.isBlocked(targetUserId, req.user.id),
+        ]);
+
+        if (blockedByRequester) {
+          res.status(403).json({ error: "Unblock this user to continue" });
+          return;
+        }
+
+        if (blockedByTarget) {
+          res.status(403).json({ error: "You are blocked by this user" });
+          return;
+        }
+
+        next();
+      } catch (error) {
+        console.error("[Auth] Error checking block status:", error);
+        res.status(500).json({ error: "Unable to verify block status" });
+      }
+    };
+  };
 }
 
 export function requireRole(...roles: string[]) {

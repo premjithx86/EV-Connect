@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, boolean, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, boolean, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -46,6 +46,14 @@ export const profiles = pgTable("profiles", {
     batteryCapacity?: number;
   }>(),
   interests: text("interests").array(),
+  followersCount: integer("followers_count").notNull().default(0),
+  followingCount: integer("following_count").notNull().default(0),
+  notificationPrefs: jsonb("notification_prefs").$type<{
+    newPost?: boolean;
+    like?: boolean;
+    comment?: boolean;
+  }>().default(sql`'{}'::jsonb`),
+  acceptsMessages: boolean("accepts_messages").notNull().default(true),
 });
 
 export const insertProfileSchema = createInsertSchema(profiles).omit({
@@ -54,6 +62,103 @@ export const insertProfileSchema = createInsertSchema(profiles).omit({
 
 export type InsertProfile = z.infer<typeof insertProfileSchema>;
 export type Profile = typeof profiles.$inferSelect;
+
+// User follows table (follower/following relationships)
+export const userFollows = pgTable("user_follows", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  followerId: varchar("follower_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  followingId: varchar("following_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  followerFollowingUnique: uniqueIndex("user_follows_follower_following_idx").on(table.followerId, table.followingId),
+}));
+
+export const insertUserFollowSchema = createInsertSchema(userFollows).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertUserFollow = z.infer<typeof insertUserFollowSchema>;
+export type UserFollow = typeof userFollows.$inferSelect;
+
+// User blocks table
+export const userBlocks = pgTable("user_blocks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  blockerId: varchar("blocker_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  blockedId: varchar("blocked_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  blockerBlockedUnique: uniqueIndex("user_blocks_blocker_blocked_idx").on(table.blockerId, table.blockedId),
+}));
+
+export const insertUserBlockSchema = createInsertSchema(userBlocks).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertUserBlock = z.infer<typeof insertUserBlockSchema>;
+export type UserBlock = typeof userBlocks.$inferSelect;
+
+// Notifications table
+export const notifications = pgTable("notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: text("type").notNull(),
+  actorId: varchar("actor_id").references(() => users.id, { onDelete: "set null" }),
+  targetType: text("target_type"),
+  targetId: varchar("target_id"),
+  metadata: jsonb("metadata"),
+  isRead: boolean("is_read").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  isRead: true,
+  createdAt: true,
+});
+
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;
+
+// Conversation table for direct messages between users
+export const conversations = pgTable("conversations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  participantAId: varchar("participant_a_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  participantBId: varchar("participant_b_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  uniqueParticipants: uniqueIndex("conversations_participants_idx").on(table.participantAId, table.participantBId),
+}));
+
+export const insertConversationSchema = createInsertSchema(conversations).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertConversation = z.infer<typeof insertConversationSchema>;
+export type Conversation = typeof conversations.$inferSelect;
+
+// Messages table
+export const messages = pgTable("messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  senderId: varchar("sender_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  isRead: boolean("is_read").notNull().default(false),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertMessageSchema = createInsertSchema(messages).omit({
+  id: true,
+  isRead: true,
+  readAt: true,
+  createdAt: true,
+});
+
+export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type Message = typeof messages.$inferSelect;
 
 // Communities table
 export const communities = pgTable("communities", {
@@ -98,6 +203,7 @@ export const posts = pgTable("posts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   authorId: varchar("author_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   communityId: varchar("community_id").references(() => communities.id, { onDelete: "set null" }),
+  title: text("title"),
   text: text("text").notNull(),
   media: jsonb("media").$type<Array<{ type: string; url: string }>>(),
   likes: text("likes").array().notNull().default(sql`ARRAY[]::text[]`),
@@ -195,6 +301,8 @@ export const insertQuestionSchema = createInsertSchema(questions).omit({
   upvotes: true,
   answersCount: true,
   createdAt: true,
+}).extend({
+  solvedAnswerId: z.string().optional().nullable(),
 });
 
 export type InsertQuestion = z.infer<typeof insertQuestionSchema>;
@@ -228,12 +336,16 @@ export const articles = pgTable("articles", {
   body: text("body").notNull(),
   coverImageUrl: text("cover_image_url"),
   tags: text("tags").array().notNull().default(sql`ARRAY[]::text[]`),
+  likes: text("likes").array().notNull().default(sql`ARRAY[]::text[]`),
+  commentsCount: integer("comments_count").notNull().default(0),
   publishedAt: timestamp("published_at").notNull().defaultNow(),
   authorId: varchar("author_id").notNull().references(() => users.id, { onDelete: "cascade" }),
 });
 
 export const insertArticleSchema = createInsertSchema(articles).omit({
   id: true,
+  likes: true,
+  commentsCount: true,
   publishedAt: true,
 });
 
@@ -279,3 +391,39 @@ export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
 
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
+
+// Article comments table
+export const articleComments = pgTable("article_comments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  articleId: varchar("article_id").notNull().references(() => articles.id, { onDelete: "cascade" }),
+  authorId: varchar("author_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertArticleCommentSchema = createInsertSchema(articleComments).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertArticleComment = z.infer<typeof insertArticleCommentSchema>;
+export type ArticleComment = typeof articleComments.$inferSelect;
+
+// Knowledge categories table
+export const knowledgeCategories = pgTable("knowledge_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  icon: text("icon").notNull().default("BookOpen"),
+  color: text("color").notNull().default("text-blue-500"),
+  createdBy: varchar("created_by").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertKnowledgeCategorySchema = createInsertSchema(knowledgeCategories).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertKnowledgeCategory = z.infer<typeof insertKnowledgeCategorySchema>;
+export type KnowledgeCategory = typeof knowledgeCategories.$inferSelect;

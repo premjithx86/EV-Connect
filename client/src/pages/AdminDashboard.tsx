@@ -1,5 +1,6 @@
 import { AdminStats } from "@/components/AdminStats";
-import { AdminTable } from "@/components/AdminTable";
+import { AdminReportsManagement } from "@/components/AdminReportsManagement";
+import { AdminUserManagement } from "@/components/AdminUserManagement";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Shield, Users, MessageSquare, Zap, FileText } from "lucide-react";
 
@@ -22,15 +23,15 @@ export default function AdminDashboard() {
         <div className="space-y-8">
           <AdminStats />
 
-          <Tabs defaultValue="reports" className="w-full">
+          <Tabs defaultValue="users" className="w-full">
             <TabsList>
-              <TabsTrigger value="reports" className="gap-2" data-testid="tab-reports">
-                <Shield className="h-4 w-4" />
-                Reports
-              </TabsTrigger>
               <TabsTrigger value="users" className="gap-2" data-testid="tab-users">
                 <Users className="h-4 w-4" />
                 Users
+              </TabsTrigger>
+              <TabsTrigger value="reports" className="gap-2" data-testid="tab-reports">
+                <Shield className="h-4 w-4" />
+                Reports
               </TabsTrigger>
               <TabsTrigger value="communities" className="gap-2" data-testid="tab-communities">
                 <MessageSquare className="h-4 w-4" />
@@ -46,14 +47,12 @@ export default function AdminDashboard() {
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="reports" className="mt-6">
-              <AdminTable />
+            <TabsContent value="users" className="mt-6">
+              <AdminUserManagement />
             </TabsContent>
 
-            <TabsContent value="users" className="mt-6">
-              <div className="text-center py-12 text-muted-foreground">
-                User management interface will be displayed here
-              </div>
+            <TabsContent value="reports" className="mt-6">
+              <AdminReportsManagement />
             </TabsContent>
 
             <TabsContent value="communities" className="mt-6">

@@ -1,4 +1,3 @@
-const OCM_API_KEY = process.env.OPEN_CHARGE_MAP_API_KEY || "";
 const OCM_BASE_URL = "https://api.openchargemap.io/v3/poi/";
 
 interface OCMStation {
@@ -48,6 +47,9 @@ export async function searchChargingStations(params: {
   countryCode?: string;
   maxResults?: number;
 }): Promise<ChargingStation[]> {
+  const rawApiKey = process.env.OPEN_CHARGE_MAP_API_KEY || "";
+  const OCM_API_KEY = rawApiKey.trim();
+
   const queryParams = new URLSearchParams({
     output: "json",
     compact: "true",
@@ -58,25 +60,39 @@ export async function searchChargingStations(params: {
     queryParams.append("latitude", params.latitude.toString());
     queryParams.append("longitude", params.longitude.toString());
     queryParams.append("distance", (params.distance || 25).toString());
-    queryParams.append("distanceunit", "KM");
+    queryParams.append("distanceunit", "Miles");
   }
 
   if (params.countryCode) {
     queryParams.append("countrycode", params.countryCode);
   }
 
+  // Add API key as query parameter (not header)
   if (OCM_API_KEY) {
     queryParams.append("key", OCM_API_KEY);
   }
 
   const url = `${OCM_BASE_URL}?${queryParams.toString()}`;
   
+  console.log("[OCM] API Key present:", !!OCM_API_KEY);
+  console.log("[OCM] API Key (first 10 chars):", OCM_API_KEY.substring(0, 10));
+  console.log("[OCM] API Key raw:", JSON.stringify(rawApiKey));
+  console.log("[OCM] Request URL:", url);
+  
   try {
-    const response = await fetch(url, {
-      headers: OCM_API_KEY ? { "X-API-Key": OCM_API_KEY } : {},
-    });
+    const headers: Record<string, string> = {
+      "User-Agent": "EVConnect/1.0"
+    };
+    // Only use query parameter for API key, not header
+    console.log("[OCM] Request headers:", headers);
+    
+    const response = await fetch(url, { headers });
 
+    console.log("[OCM] Response status:", response.status, response.statusText);
+    
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error("[OCM] Error response body:", errorText);
       throw new Error(`OCM API error: ${response.statusText}`);
     }
 

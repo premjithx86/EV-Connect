@@ -6,13 +6,86 @@ import { ArticleCard } from "@/components/ArticleCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { TrendingUp, Clock } from "lucide-react";
-import avatarWoman from "@assets/generated_images/User_avatar_woman_bdd37206.png";
-import avatarMan from "@assets/generated_images/User_avatar_man_9666579e.png";
-import teslaImage from "@assets/generated_images/Tesla_Model_3_post_19f1f84d.png";
-import communityImage from "@assets/generated_images/EV_community_meetup_1339d9c4.png";
-import chargingImage from "@assets/generated_images/Charging_connector_closeup_2fe4a9b5.png";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { useLocation } from "wouter";
+
+interface Post {
+  id: string;
+  title?: string;
+  text: string;
+  media?: Array<{ type: string; url: string }>;
+  communityId?: string;
+  community?: string;
+  authorId: string;
+  author: {
+    id: string;
+    displayName: string;
+    avatarUrl?: string;
+  };
+  likes: string[];
+  commentsCount: number;
+  createdAt: string;
+}
+
+interface Community {
+  id: string;
+  name: string;
+  type: string;
+  description: string;
+  membersCount: number;
+  coverImageUrl?: string;
+}
+
+interface Article {
+  id: string;
+  title: string;
+  summary: string;
+  kind: string;
+  coverImageUrl?: string;
+  authorId: string;
+  publishedAt: string;
+  tags: string[];
+}
 
 export default function Home() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [, setLocation] = useLocation();
+
+  const { data: posts, isLoading: postsLoading, refetch: refetchPosts } = useQuery<Post[]>({
+    queryKey: ["/api/posts", { limit: 10 }],
+    queryFn: async ({ queryKey }) => {
+      const res = await fetch(`${queryKey[0]}?limit=10`);
+      if (!res.ok) throw new Error("Failed to fetch posts");
+      return res.json();
+    },
+  });
+
+  const { data: communities, isLoading: communitiesLoading } = useQuery<Community[]>({
+    queryKey: ["/api/communities", { limit: 5 }],
+    queryFn: async ({ queryKey }) => {
+      const res = await fetch(`${queryKey[0]}?limit=5`);
+      if (!res.ok) throw new Error("Failed to fetch communities");
+      return res.json();
+    },
+  });
+
+  const { data: articles, isLoading: articlesLoading } = useQuery<Article[]>({
+    queryKey: ["/api/articles", { limit: 3 }],
+    queryFn: async ({ queryKey }) => {
+      const res = await fetch(`${queryKey[0]}?limit=3`);
+      if (!res.ok) throw new Error("Failed to fetch articles");
+      return res.json();
+    },
+  });
+
+  const handlePostCreated = () => {
+    refetchPosts();
+    toast({ title: "Post created successfully!" });
+  };
+
   return (
     <div className="min-h-screen">
       <HeroSection />
@@ -20,10 +93,13 @@ export default function Home() {
       <div className="max-w-7xl mx-auto px-4 py-12">
         <div className="grid lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6">
-            <PostComposer
-              userAvatar={avatarMan}
-              userName="Alex Rivera"
-            />
+            {user && (
+              <PostComposer
+                userAvatar={user.email || undefined}
+                userName={user.email || "User"}
+                onPostCreated={handlePostCreated}
+              />
+            )}
 
             <Tabs defaultValue="trending" className="w-full">
               <TabsList className="w-full justify-start">
@@ -38,58 +114,73 @@ export default function Home() {
               </TabsList>
 
               <TabsContent value="trending" className="space-y-6 mt-6">
-                <PostCard
-                  id="1"
-                  author={{
-                    name: "Sarah Chen",
-                    avatar: avatarWoman,
-                  }}
-                  timestamp="2h ago"
-                  community="Tesla Owners"
-                  text="Just completed my first long road trip with the Model 3! The Supercharger network made it incredibly easy. Averaged 250 Wh/mi on the highway. Can't believe I was worried about range anxiety!"
-                  media={[teslaImage]}
-                  likes={42}
-                  comments={8}
-                />
-
-                <PostCard
-                  id="2"
-                  author={{
-                    name: "Mike Johnson",
-                    avatar: avatarMan,
-                  }}
-                  timestamp="5h ago"
-                  text="PSA: Winter is here! Remember to precondition your battery before charging in cold weather. It makes a huge difference in charging speed and battery health. Stay warm out there!"
-                  likes={28}
-                  comments={12}
-                />
-
-                <PostCard
-                  id="3"
-                  author={{
-                    name: "Emily Park",
-                    avatar: avatarWoman,
-                  }}
-                  timestamp="1d ago"
-                  community="EV Tips"
-                  text="Found an amazing hidden gem charging station with a café nearby. Perfect spot to relax while charging. Location in comments!"
-                  likes={56}
-                  comments={23}
-                />
+                {postsLoading ? (
+                  <div className="space-y-4">
+                    {[...Array(3)].map((_, i) => (
+                      <div key={i} className="animate-pulse bg-muted rounded-lg h-48" />
+                    ))}
+                  </div>
+                ) : posts && posts.length > 0 ? (
+                  posts.map((post) => (
+                    <PostCard
+                      key={post.id}
+                      id={post.id}
+                      author={{
+                        id: post.authorId,
+                        name: post.author.displayName || post.authorId,
+                        avatar: post.author.avatarUrl,
+                      }}
+                      timestamp={new Date(post.createdAt).toLocaleString()}
+                      community={post.community}
+                      text={post.text}
+                      media={post.media?.map(m => m.url)}
+                      likes={post.likes.length}
+                      comments={post.commentsCount}
+                      isLiked={user ? post.likes.includes(user.id) : false}
+                      onRefresh={refetchPosts}
+                    />
+                  ))
+                ) : (
+                  <div className="text-center py-12">
+                    <p className="text-muted-foreground">No posts yet. Be the first to share something!</p>
+                  </div>
+                )}
               </TabsContent>
 
               <TabsContent value="recent" className="space-y-6 mt-6">
-                <PostCard
-                  id="4"
-                  author={{
-                    name: "Alex Rivera",
-                    avatar: avatarMan,
-                  }}
-                  timestamp="15m ago"
-                  text="Question: What's your favorite EV charging app? Looking for something with real-time availability."
-                  likes={5}
-                  comments={3}
-                />
+                {postsLoading ? (
+                  <div className="space-y-4">
+                    {[...Array(3)].map((_, i) => (
+                      <div key={i} className="animate-pulse bg-muted rounded-lg h-48" />
+                    ))}
+                  </div>
+                ) : posts && posts.length > 0 ? (
+                  posts
+                    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                    .map((post) => (
+                      <PostCard
+                        key={post.id}
+                        id={post.id}
+                        author={{
+                          id: post.authorId,
+                          name: post.author.displayName || post.authorId,
+                          avatar: post.author.avatarUrl,
+                        }}
+                        timestamp={new Date(post.createdAt).toLocaleString()}
+                        community={post.community}
+                        text={post.text}
+                        media={post.media?.map(m => m.url)}
+                        likes={post.likes.length}
+                        comments={post.commentsCount}
+                        isLiked={user ? post.likes.includes(user.id) : false}
+                        onRefresh={refetchPosts}
+                      />
+                    ))
+                ) : (
+                  <div className="text-center py-12">
+                    <p className="text-muted-foreground">No posts yet. Be the first to share something!</p>
+                  </div>
+                )}
               </TabsContent>
             </Tabs>
           </div>
@@ -98,43 +189,62 @@ export default function Home() {
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="font-display font-semibold text-xl">Featured Communities</h2>
-                <Button variant="ghost" size="sm" data-testid="button-view-all-communities">View all</Button>
+                <Button variant="ghost" size="sm" data-testid="button-view-all-communities" onClick={() => setLocation("/communities")}>View all</Button>
               </div>
               <div className="space-y-4">
-                <CommunityCard
-                  id="1"
-                  name="Tesla Owners"
-                  type="BRAND"
-                  coverImage={communityImage}
-                  description="A community for Tesla owners to share experiences and tips."
-                  memberCount={15420}
-                />
-                <CommunityCard
-                  id="2"
-                  name="California EV Club"
-                  type="REGION"
-                  description="Connect with EV enthusiasts in California."
-                  memberCount={8234}
-                />
+                {communitiesLoading ? (
+                  <div className="space-y-4">
+                    {[...Array(2)].map((_, i) => (
+                      <div key={i} className="animate-pulse bg-muted rounded-lg h-24" />
+                    ))}
+                  </div>
+                ) : communities && communities.length > 0 ? (
+                  communities.map((community) => (
+                    <CommunityCard
+                      key={community.id}
+                      id={community.id}
+                      name={community.name}
+                      type={community.type as any}
+                      coverImage={community.coverImageUrl}
+                      description={community.description}
+                      membersCount={community.membersCount}
+                    />
+                  ))
+                ) : (
+                  <p className="text-muted-foreground">No communities available</p>
+                )}
               </div>
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="font-display font-semibold text-xl">Latest Articles</h2>
-                <Button variant="ghost" size="sm" data-testid="button-view-all-articles">View all</Button>
+                <Button variant="ghost" size="sm" data-testid="button-view-all-articles" onClick={() => setLocation("/articles")}>View all</Button>
               </div>
               <div className="space-y-4">
-                <ArticleCard
-                  id="1"
-                  kind="TIP"
-                  title="5 Tips to Maximize Your EV Range"
-                  summary="Learn proven strategies to extend your electric vehicle's range."
-                  coverImage={chargingImage}
-                  author="EV Connect Team"
-                  publishedAt="Dec 15, 2024"
-                  tags={["range", "efficiency"]}
-                />
+                {articlesLoading ? (
+                  <div className="space-y-4">
+                    {[...Array(1)].map((_, i) => (
+                      <div key={i} className="animate-pulse bg-muted rounded-lg h-32" />
+                    ))}
+                  </div>
+                ) : articles && articles.length > 0 ? (
+                  articles.map((article) => (
+                    <ArticleCard
+                      key={article.id}
+                      id={article.id}
+                      kind={article.kind as any}
+                      title={article.title}
+                      summary={article.summary}
+                      coverImage={article.coverImageUrl}
+                      author={article.authorId}
+                      publishedAt={new Date(article.publishedAt).toLocaleDateString()}
+                      tags={article.tags}
+                    />
+                  ))
+                ) : (
+                  <p className="text-muted-foreground">No articles available</p>
+                )}
               </div>
             </div>
           </div>

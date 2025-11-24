@@ -1,8 +1,31 @@
-import { storage } from "./storage";
+import { createStorage } from "./storage";
 import { hashPassword } from "./auth";
 
 export async function seedData() {
   console.log("🌱 Seeding demo data...");
+
+  // Get the proper storage instance (MongoDB or MemStorage)
+  const storage = await createStorage();
+
+  // Check if data already exists
+  const existingUser = await storage.getUserByEmail("alice@evconnect.com");
+  if (existingUser) {
+    console.log("✅ Demo data already exists, skipping seed...");
+    return;
+  }
+
+  // Clear existing data first
+  console.log("🧹 Clearing existing data...");
+  try {
+    // This is a MongoDB-specific operation, but for demo purposes we'll use it
+    const mongoose = (storage as any).db?.mongoose || (storage as any).mongoose;
+    if (mongoose && mongoose.connection) {
+      await mongoose.connection.db.dropDatabase();
+      console.log("✅ Cleared existing database");
+    }
+  } catch (error) {
+    console.log("⚠️ Could not clear database, continuing...");
+  }
 
   // Create users
   const demoUsers = [
@@ -70,6 +93,7 @@ export async function seedData() {
       slug: "tesla-owners",
       type: "BRAND",
       description: "Community for Tesla owners and enthusiasts",
+      createdBy: userIds[0],
       moderators: [userIds[0]],
     },
     {
@@ -77,6 +101,7 @@ export async function seedData() {
       slug: "ev-charging-tips",
       type: "GENERAL",
       description: "Share charging tips, tricks, and best practices",
+      createdBy: userIds[2],
       moderators: [userIds[2]],
     },
     {
@@ -84,6 +109,7 @@ export async function seedData() {
       slug: "long-range-drivers",
       type: "GENERAL",
       description: "For EV owners who love road trips",
+      createdBy: userIds[0],
       moderators: [userIds[0]],
     },
     {
@@ -91,6 +117,7 @@ export async function seedData() {
       slug: "budget-evs",
       type: "GENERAL",
       description: "Affordable electric vehicle discussion",
+      createdBy: userIds[1],
       moderators: [userIds[1]],
     },
   ];

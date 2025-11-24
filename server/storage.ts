@@ -10,8 +10,15 @@ import {
   type Question, type InsertQuestion,
   type Answer, type InsertAnswer,
   type Article, type InsertArticle,
+  type ArticleComment, type InsertArticleComment,
   type Report, type InsertReport,
   type AuditLog, type InsertAuditLog,
+  type KnowledgeCategory, type InsertKnowledgeCategory,
+  type UserFollow, type InsertUserFollow,
+  type UserBlock, type InsertUserBlock,
+  type Notification, type InsertNotification,
+  type Conversation, type InsertConversation,
+  type Message, type InsertMessage,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -19,8 +26,10 @@ export interface IStorage {
   // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getUsers?(): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<Omit<User, 'id' | 'createdAt'>>): Promise<User | undefined>;
+  deleteUser?(id: string): Promise<boolean>;
   
   // Profiles
   getProfile(userId: string): Promise<Profile | undefined>;
@@ -34,6 +43,7 @@ export interface IStorage {
   getCommunityBySlug(slug: string): Promise<Community | undefined>;
   createCommunity(community: InsertCommunity): Promise<Community>;
   updateCommunity(id: string, updates: Partial<Omit<Community, 'id' | 'createdAt'>>): Promise<Community | undefined>;
+  deleteCommunity?(id: string): Promise<boolean>;
   
   // Community Members
   joinCommunity(data: InsertCommunityMember): Promise<CommunityMember>;
@@ -73,6 +83,7 @@ export interface IStorage {
   createQuestion(question: InsertQuestion): Promise<Question>;
   updateQuestion(id: string, updates: Partial<Omit<Question, 'id' | 'createdAt' | 'authorId'>>): Promise<Question | undefined>;
   toggleQuestionUpvote(questionId: string, userId: string): Promise<Question | undefined>;
+  deleteQuestion?(id: string): Promise<boolean>;
   
   // Answers
   getAnswers(questionId: string): Promise<Answer[]>;
@@ -84,6 +95,14 @@ export interface IStorage {
   getArticles(filters?: { kind?: string; tag?: string; limit?: number }): Promise<Article[]>;
   getArticle(id: string): Promise<Article | undefined>;
   createArticle(article: InsertArticle): Promise<Article>;
+  toggleArticleLike(articleId: string, userId: string): Promise<Article | undefined>;
+  deleteArticle(id: string): Promise<boolean>;
+  
+  // Article Comments
+  getArticleComments(articleId: string): Promise<ArticleComment[]>;
+  getArticleComment(id: string): Promise<ArticleComment | undefined>;
+  createArticleComment(comment: InsertArticleComment): Promise<ArticleComment>;
+  deleteArticleComment(id: string): Promise<boolean>;
   
   // Reports
   getReports(filters?: { status?: string; limit?: number }): Promise<Report[]>;
@@ -94,6 +113,42 @@ export interface IStorage {
   // Audit Logs
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
   getAuditLogs(limit?: number): Promise<AuditLog[]>;
+  
+  // Knowledge Categories
+  getKnowledgeCategories?(): Promise<KnowledgeCategory[]>;
+  getKnowledgeCategory?(id: string): Promise<KnowledgeCategory | undefined>;
+  createKnowledgeCategory?(category: InsertKnowledgeCategory): Promise<KnowledgeCategory>;
+  deleteKnowledgeCategory?(id: string): Promise<boolean>;
+
+  // Social: Follows
+  followUser(followerId: string, followingId: string): Promise<UserFollow>;
+  unfollowUser(followerId: string, followingId: string): Promise<boolean>;
+  getFollowers(userId: string): Promise<UserFollow[]>;
+  getFollowing(userId: string): Promise<UserFollow[]>;
+  isFollowing(followerId: string, followingId: string): Promise<boolean>;
+
+  // Social: Blocks
+  blockUser(blockerId: string, blockedId: string): Promise<UserBlock>;
+  unblockUser(blockerId: string, blockedId: string): Promise<boolean>;
+  isBlocked(blockerId: string, blockedId: string): Promise<boolean>;
+  getBlockedUsers(userId: string): Promise<UserBlock[]>;
+  getBlockedByUsers(userId: string): Promise<UserBlock[]>;
+
+  // Notifications
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  getNotifications(userId: string, options?: { unreadOnly?: boolean; limit?: number }): Promise<Notification[]>;
+  markNotificationRead(userId: string, notificationId: string): Promise<Notification | undefined>;
+  markAllNotificationsRead(userId: string): Promise<number>;
+
+  // Conversations & Messages
+  getConversation(conversationId: string): Promise<Conversation | undefined>;
+  findConversationBetween(userAId: string, userBId: string): Promise<Conversation | undefined>;
+  createConversation(data: InsertConversation): Promise<Conversation>;
+  getConversationsForUser(userId: string): Promise<Conversation[]>;
+  createMessage(message: InsertMessage): Promise<Message>;
+  getMessages(conversationId: string, options?: { limit?: number; before?: Date }): Promise<Message[]>;
+  markMessageRead(conversationId: string, messageId: string, userId: string): Promise<Message | undefined>;
+  getUnreadMessageCount(userId: string): Promise<number>;
 }
 
 export class MemStorage implements IStorage {
@@ -108,8 +163,15 @@ export class MemStorage implements IStorage {
   private questions: Map<string, Question>;
   private answers: Map<string, Answer>;
   private articles: Map<string, Article>;
+  private articleComments: Map<string, ArticleComment>;
   private reports: Map<string, Report>;
   private auditLogs: Map<string, AuditLog>;
+  private knowledgeCategories: Map<string, KnowledgeCategory>;
+  private userFollows: Map<string, UserFollow>;
+  private userBlocks: Map<string, UserBlock>;
+  private notifications: Map<string, Notification>;
+  private conversations: Map<string, Conversation>;
+  private messages: Map<string, Message>;
 
   constructor() {
     this.users = new Map();
@@ -123,8 +185,15 @@ export class MemStorage implements IStorage {
     this.questions = new Map();
     this.answers = new Map();
     this.articles = new Map();
+    this.articleComments = new Map();
     this.reports = new Map();
     this.auditLogs = new Map();
+    this.knowledgeCategories = new Map();
+    this.userFollows = new Map();
+    this.userBlocks = new Map();
+    this.notifications = new Map();
+    this.conversations = new Map();
+    this.messages = new Map();
   }
 
   // Users
@@ -158,6 +227,20 @@ export class MemStorage implements IStorage {
     return updated;
   }
 
+  async getUsers(): Promise<User[]> {
+    return Array.from(this.users.values());
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    const deleted = this.users.delete(id);
+    // Also delete user's profile
+    const profile = await this.getProfile(id);
+    if (profile) {
+      this.profiles.delete(profile.id);
+    }
+    return deleted;
+  }
+
   // Profiles
   async getProfile(userId: string): Promise<Profile | undefined> {
     return Array.from(this.profiles.values()).find(p => p.userId === userId);
@@ -169,6 +252,10 @@ export class MemStorage implements IStorage {
 
   async createProfile(insertProfile: InsertProfile): Promise<Profile> {
     const id = randomUUID();
+    const notificationPrefs = insertProfile.notificationPrefs
+      ? insertProfile.notificationPrefs as Profile['notificationPrefs']
+      : { newPost: true, like: true, comment: true } as Profile['notificationPrefs'];
+
     const profile: Profile = {
       id,
       userId: insertProfile.userId,
@@ -178,6 +265,10 @@ export class MemStorage implements IStorage {
       location: insertProfile.location as Profile['location'] ?? null,
       vehicle: insertProfile.vehicle as Profile['vehicle'] ?? null,
       interests: insertProfile.interests ?? null,
+      followersCount: insertProfile.followersCount ?? 0,
+      followingCount: insertProfile.followingCount ?? 0,
+      notificationPrefs,
+      acceptsMessages: insertProfile.acceptsMessages ?? true,
     };
     this.profiles.set(id, profile);
     return profile;
@@ -189,6 +280,272 @@ export class MemStorage implements IStorage {
     const updated = { ...profile, ...updates };
     this.profiles.set(profile.id, updated);
     return updated;
+  }
+
+  private getProfileByUserId(userId: string): Profile | undefined {
+    return Array.from(this.profiles.values()).find((profile) => profile.userId === userId);
+  }
+
+  private adjustFollowerCounts(followerId: string, followingId: string, delta: number) {
+    const followerProfile = this.getProfileByUserId(followerId);
+    if (followerProfile) {
+      followerProfile.followingCount = Math.max(0, (followerProfile.followingCount ?? 0) + delta);
+      this.profiles.set(followerProfile.id, { ...followerProfile });
+    }
+    const followingProfile = this.getProfileByUserId(followingId);
+    if (followingProfile) {
+      followingProfile.followersCount = Math.max(0, (followingProfile.followersCount ?? 0) + delta);
+      this.profiles.set(followingProfile.id, { ...followingProfile });
+    }
+  }
+
+  // Social: Follows
+  async followUser(followerId: string, followingId: string): Promise<UserFollow> {
+    const existing = Array.from(this.userFollows.values()).find(
+      (follow) => follow.followerId === followerId && follow.followingId === followingId
+    );
+    if (existing) {
+      return existing;
+    }
+
+    const id = randomUUID();
+    const follow: UserFollow = {
+      id,
+      followerId,
+      followingId,
+      createdAt: new Date(),
+    };
+    this.userFollows.set(id, follow);
+    this.adjustFollowerCounts(followerId, followingId, 1);
+    return follow;
+  }
+
+  async unfollowUser(followerId: string, followingId: string): Promise<boolean> {
+    const entry = Array.from(this.userFollows.values()).find(
+      (follow) => follow.followerId === followerId && follow.followingId === followingId
+    );
+    if (!entry) {
+      return false;
+    }
+    this.userFollows.delete(entry.id);
+    this.adjustFollowerCounts(followerId, followingId, -1);
+    return true;
+  }
+
+  async getFollowers(userId: string): Promise<UserFollow[]> {
+    return Array.from(this.userFollows.values()).filter((follow) => follow.followingId === userId);
+  }
+
+  async getFollowing(userId: string): Promise<UserFollow[]> {
+    return Array.from(this.userFollows.values()).filter((follow) => follow.followerId === userId);
+  }
+
+  async isFollowing(followerId: string, followingId: string): Promise<boolean> {
+    return Array.from(this.userFollows.values()).some(
+      (follow) => follow.followerId === followerId && follow.followingId === followingId
+    );
+  }
+
+  // Social: Blocks
+  async blockUser(blockerId: string, blockedId: string): Promise<UserBlock> {
+    const existing = Array.from(this.userBlocks.values()).find(
+      (block) => block.blockerId === blockerId && block.blockedId === blockedId
+    );
+    if (existing) {
+      return existing;
+    }
+
+    const id = randomUUID();
+    const block: UserBlock = {
+      id,
+      blockerId,
+      blockedId,
+      createdAt: new Date(),
+    };
+    this.userBlocks.set(id, block);
+
+    // Remove any follow relationships between the users
+    for (const follow of Array.from(this.userFollows.values())) {
+      if (
+        (follow.followerId === blockerId && follow.followingId === blockedId) ||
+        (follow.followerId === blockedId && follow.followingId === blockerId)
+      ) {
+        this.userFollows.delete(follow.id);
+        const delta = -1;
+        this.adjustFollowerCounts(follow.followerId, follow.followingId, delta);
+      }
+    }
+
+    return block;
+  }
+
+  async unblockUser(blockerId: string, blockedId: string): Promise<boolean> {
+    const entry = Array.from(this.userBlocks.values()).find(
+      (block) => block.blockerId === blockerId && block.blockedId === blockedId
+    );
+    if (!entry) {
+      return false;
+    }
+    this.userBlocks.delete(entry.id);
+    return true;
+  }
+
+  async isBlocked(blockerId: string, blockedId: string): Promise<boolean> {
+    return Array.from(this.userBlocks.values()).some(
+      (block) => block.blockerId === blockerId && block.blockedId === blockedId
+    );
+  }
+
+  async getBlockedUsers(userId: string): Promise<UserBlock[]> {
+    return Array.from(this.userBlocks.values()).filter((block) => block.blockerId === userId);
+  }
+
+  async getBlockedByUsers(userId: string): Promise<UserBlock[]> {
+    return Array.from(this.userBlocks.values()).filter((block) => block.blockedId === userId);
+  }
+
+  // Notifications
+  async createNotification(notification: InsertNotification): Promise<Notification> {
+    const id = randomUUID();
+    const entity: Notification = {
+      id,
+      userId: notification.userId,
+      type: notification.type,
+      actorId: notification.actorId ?? null,
+      targetType: notification.targetType ?? null,
+      targetId: notification.targetId ?? null,
+      metadata: notification.metadata ?? null,
+      isRead: false,
+      createdAt: new Date(),
+    };
+    this.notifications.set(id, entity);
+    return entity;
+  }
+
+  async getNotifications(userId: string, options?: { unreadOnly?: boolean; limit?: number }): Promise<Notification[]> {
+    let results = Array.from(this.notifications.values()).filter((n) => n.userId === userId);
+    if (options?.unreadOnly) {
+      results = results.filter((n) => !n.isRead);
+    }
+    results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    if (options?.limit !== undefined) {
+      results = results.slice(0, options.limit);
+    }
+    return results;
+  }
+
+  async markNotificationRead(userId: string, notificationId: string): Promise<Notification | undefined> {
+    const notification = this.notifications.get(notificationId);
+    if (!notification || notification.userId !== userId) {
+      return undefined;
+    }
+    const updated = { ...notification, isRead: true };
+    this.notifications.set(notificationId, updated);
+    return updated;
+  }
+
+  async markAllNotificationsRead(userId: string): Promise<number> {
+    let count = 0;
+    for (const [id, notification] of Array.from(this.notifications.entries())) {
+      if (notification.userId === userId && !notification.isRead) {
+        count += 1;
+        this.notifications.set(id, { ...notification, isRead: true });
+      }
+    }
+    return count;
+  }
+
+  // Conversations & Messages
+  async getConversation(conversationId: string): Promise<Conversation | undefined> {
+    return this.conversations.get(conversationId);
+  }
+
+  async findConversationBetween(userAId: string, userBId: string): Promise<Conversation | undefined> {
+    return Array.from(this.conversations.values()).find((conversation) => {
+      const pair = [conversation.participantAId, conversation.participantBId];
+      return pair.includes(userAId) && pair.includes(userBId);
+    });
+  }
+
+  async createConversation(data: InsertConversation): Promise<Conversation> {
+    const existing = await this.findConversationBetween(data.participantAId, data.participantBId);
+    if (existing) {
+      return existing;
+    }
+
+    const id = randomUUID();
+    const conversation: Conversation = {
+      id,
+      participantAId: data.participantAId,
+      participantBId: data.participantBId,
+      createdAt: new Date(),
+    };
+    this.conversations.set(id, conversation);
+    return conversation;
+  }
+
+  async getConversationsForUser(userId: string): Promise<Conversation[]> {
+    return Array.from(this.conversations.values()).filter(
+      (conversation) => conversation.participantAId === userId || conversation.participantBId === userId
+    );
+  }
+
+  async createMessage(message: InsertMessage): Promise<Message> {
+    const id = randomUUID();
+    const entity: Message = {
+      id,
+      conversationId: message.conversationId,
+      senderId: message.senderId,
+      body: message.body,
+      isRead: false,
+      readAt: null,
+      createdAt: new Date(),
+    };
+    this.messages.set(id, entity);
+    return entity;
+  }
+
+  async getMessages(conversationId: string, options?: { limit?: number; before?: Date }): Promise<Message[]> {
+    let msgs = Array.from(this.messages.values()).filter((message) => message.conversationId === conversationId);
+    const before = options?.before;
+    if (before) {
+      msgs = msgs.filter((message) => message.createdAt < before);
+    }
+    msgs.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    if (options?.limit !== undefined) {
+      msgs = msgs.slice(-options.limit);
+    }
+    return msgs;
+  }
+
+  async markMessageRead(conversationId: string, messageId: string, userId: string): Promise<Message | undefined> {
+    const message = this.messages.get(messageId);
+    if (!message || message.conversationId !== conversationId) {
+      return undefined;
+    }
+    if (message.senderId === userId) {
+      return message;
+    }
+    const updated: Message = { ...message, isRead: true, readAt: new Date() };
+    this.messages.set(messageId, updated);
+    return updated;
+  }
+
+  async getUnreadMessageCount(userId: string): Promise<number> {
+    const conversations = await this.getConversationsForUser(userId);
+    if (conversations.length === 0) {
+      return 0;
+    }
+
+    const conversationIds = new Set(conversations.map((conversation) => conversation.id));
+    let count = 0;
+    this.messages.forEach((message) => {
+      if (conversationIds.has(message.conversationId) && message.senderId !== userId && !message.isRead) {
+        count += 1;
+      }
+    });
+
+    return count;
   }
 
   // Communities
@@ -238,6 +595,14 @@ export class MemStorage implements IStorage {
     const updated = { ...community, ...updates };
     this.communities.set(id, updated);
     return updated;
+  }
+
+  async deleteCommunity(id: string): Promise<boolean> {
+    const deleted = this.communities.delete(id);
+    // Also delete all community members
+    const members = Array.from(this.communityMembers.values()).filter(m => m.communityId === id);
+    members.forEach(m => this.communityMembers.delete(m.id));
+    return deleted;
   }
 
   // Community Members
@@ -322,6 +687,7 @@ export class MemStorage implements IStorage {
       id,
       authorId: insertPost.authorId,
       communityId: insertPost.communityId ?? null,
+      title: insertPost.title ?? null,
       text: insertPost.text,
       media: insertPost.media as Post['media'] ?? null,
       visibility: insertPost.visibility ?? "PUBLIC",
@@ -566,6 +932,15 @@ export class MemStorage implements IStorage {
     return updated;
   }
 
+  async deleteQuestion(id: string): Promise<boolean> {
+    // Delete all answers for this question
+    const answers = Array.from(this.answers.values()).filter(a => a.questionId === id);
+    answers.forEach(answer => this.answers.delete(answer.id));
+    
+    // Delete the question
+    return this.questions.delete(id);
+  }
+
   // Answers
   async getAnswers(questionId: string): Promise<Answer[]> {
     return Array.from(this.answers.values())
@@ -639,11 +1014,79 @@ export class MemStorage implements IStorage {
       body: insertArticle.body,
       coverImageUrl: insertArticle.coverImageUrl ?? null,
       tags: insertArticle.tags ?? [],
+      likes: [],
+      commentsCount: 0,
       authorId: insertArticle.authorId,
       publishedAt: new Date(),
     };
     this.articles.set(id, article);
     return article;
+  }
+
+  async toggleArticleLike(articleId: string, userId: string): Promise<Article | undefined> {
+    const article = this.articles.get(articleId);
+    if (!article) return undefined;
+    
+    const likes = article.likes || [];
+    const index = likes.indexOf(userId);
+    
+    if (index > -1) {
+      likes.splice(index, 1);
+    } else {
+      likes.push(userId);
+    }
+    
+    const updated = { ...article, likes };
+    this.articles.set(articleId, updated);
+    return updated;
+  }
+
+  async deleteArticle(id: string): Promise<boolean> {
+    const deleted = this.articles.delete(id);
+    // Also delete all comments for this article
+    const comments = Array.from(this.articleComments.values()).filter(c => c.articleId === id);
+    comments.forEach(c => this.articleComments.delete(c.id));
+    return deleted;
+  }
+
+  // Article Comments
+  async getArticleComments(articleId: string): Promise<ArticleComment[]> {
+    return Array.from(this.articleComments.values())
+      .filter(c => c.articleId === articleId)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }
+
+  async getArticleComment(id: string): Promise<ArticleComment | undefined> {
+    return this.articleComments.get(id);
+  }
+
+  async createArticleComment(insertComment: InsertArticleComment): Promise<ArticleComment> {
+    const id = randomUUID();
+    const comment: ArticleComment = { id, ...insertComment, createdAt: new Date() };
+    this.articleComments.set(id, comment);
+    
+    const article = await this.getArticle(insertComment.articleId);
+    if (article) {
+      const updated = { ...article, commentsCount: article.commentsCount + 1 };
+      this.articles.set(insertComment.articleId, updated);
+    }
+    
+    return comment;
+  }
+
+  async deleteArticleComment(id: string): Promise<boolean> {
+    const comment = this.articleComments.get(id);
+    if (!comment) return false;
+    
+    this.articleComments.delete(id);
+    
+    const article = await this.getArticle(comment.articleId);
+    if (article) {
+      const updated = { ...article, commentsCount: Math.max(0, article.commentsCount - 1) };
+      this.articles.set(comment.articleId, updated);
+    }
+    
+    return true;
   }
 
   // Reports
@@ -709,6 +1152,48 @@ export class MemStorage implements IStorage {
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, limit);
   }
+
+  // Knowledge Categories
+  async getKnowledgeCategories(): Promise<KnowledgeCategory[]> {
+    return Array.from(this.knowledgeCategories.values());
+  }
+
+  async getKnowledgeCategory(id: string): Promise<KnowledgeCategory | undefined> {
+    return this.knowledgeCategories.get(id);
+  }
+
+  async createKnowledgeCategory(insertCategory: InsertKnowledgeCategory): Promise<KnowledgeCategory> {
+    const id = randomUUID();
+    const category: KnowledgeCategory = {
+      id,
+      name: insertCategory.name,
+      description: insertCategory.description,
+      icon: insertCategory.icon || "BookOpen",
+      color: insertCategory.color || "text-blue-500",
+      createdBy: insertCategory.createdBy,
+      createdAt: new Date(),
+    };
+    this.knowledgeCategories.set(id, category);
+    return category;
+  }
+
+  async deleteKnowledgeCategory(id: string): Promise<boolean> {
+    return this.knowledgeCategories.delete(id);
+  }
 }
 
+export async function createStorage(): Promise<IStorage> {
+  const useMongoDB = process.env.USE_MONGODB === 'true';
+
+  if (useMongoDB) {
+    const { connectToMongoDB } = await import("./mongo-storage");
+    await connectToMongoDB(process.env.MONGODB_URI);
+    const { MongoStorage } = await import("./mongo-storage");
+    return new MongoStorage();
+  } else {
+    return new MemStorage();
+  }
+}
+
+// Default export for backward compatibility
 export const storage = new MemStorage();

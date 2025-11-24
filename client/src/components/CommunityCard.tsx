@@ -10,7 +10,7 @@ interface CommunityCardProps {
   type: string;
   coverImage?: string;
   description: string;
-  memberCount: number;
+  membersCount: number;
   isJoined?: boolean;
 }
 
@@ -20,7 +20,7 @@ export function CommunityCard({
   type,
   coverImage,
   description,
-  memberCount,
+  membersCount,
   isJoined = false,
 }: CommunityCardProps) {
   const [joined, setJoined] = useState(isJoined);
@@ -78,7 +78,7 @@ export function CommunityCard({
 
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Users className="h-4 w-4" />
-            <span>{memberCount.toLocaleString()} members</span>
+            <span>{membersCount.toLocaleString()} members</span>
           </div>
         </div>
       </div>

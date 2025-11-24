@@ -1,12 +1,118 @@
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
+import { useAuth } from "@/contexts/AuthContext";
 import { QuestionCard } from "@/components/QuestionCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
 import { Search, Plus, TrendingUp, Clock, CheckCircle } from "lucide-react";
 
+interface Question {
+  id: string;
+  title: string;
+  body: string;
+  tags: string[];
+  authorId: string;
+  upvotes: string[];
+  answersCount: number;
+  solvedAnswerId: string | null;
+  createdAt: string;
+  author?: {
+    displayName: string;
+    avatarUrl?: string;
+  };
+}
+
 export default function QAForum() {
+  const [, setLocation] = useLocation();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [newQuestion, setNewQuestion] = useState({
+    title: "",
+    body: "",
+    tags: "",
+  });
+
   const popularTags = ["battery", "charging", "maintenance", "range", "winter", "software"];
+
+  const { data: questions, isLoading } = useQuery<Question[]>({
+    queryKey: ["/api/questions", { tag: selectedTag, limit: 50 }],
+    queryFn: async ({ queryKey }) => {
+      const [url, params] = queryKey as [string, { tag: string | null; limit: number }];
+      const queryParams = new URLSearchParams();
+      if (params.tag) queryParams.append("tag", params.tag);
+      queryParams.append("limit", params.limit.toString());
+      const res = await fetch(`${url}?${queryParams.toString()}`);
+      if (!res.ok) throw new Error("Failed to fetch questions");
+      return res.json();
+    },
+  });
+
+  const handleCreateQuestion = async () => {
+    if (!user) {
+      toast({ title: "Please login to ask a question", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const tags = newQuestion.tags.split(",").map(t => t.trim()).filter(Boolean);
+      const res = await fetch("/api/questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          title: newQuestion.title,
+          body: newQuestion.body,
+          tags,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to create question");
+      const data = await res.json();
+      toast({ title: "Question posted successfully!" });
+      setCreateDialogOpen(false);
+      setNewQuestion({ title: "", body: "", tags: "" });
+      setLocation(`/questions/${data.id}`);
+    } catch (error) {
+      toast({ title: "Failed to create question", variant: "destructive" });
+    }
+  };
+
+  const filteredQuestions = questions?.filter((q) => {
+    const matchesSearch = searchQuery === "" ||
+      q.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      q.body.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesSearch;
+  });
+
+  const recentQuestions = filteredQuestions?.sort((a, b) => 
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  const popularQuestions = filteredQuestions?.sort((a, b) => 
+    b.upvotes.length - a.upvotes.length
+  );
+
+  const solvedQuestions = filteredQuestions?.filter(q => q.solvedAnswerId);
+
+  const getTimeAgo = (date: string) => {
+    const now = new Date();
+    const then = new Date(date);
+    const seconds = Math.floor((now.getTime() - then.getTime()) / 1000);
+    if (seconds < 60) return "just now";
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -19,7 +125,11 @@ export default function QAForum() {
                 Get answers from the EV community
               </p>
             </div>
-            <Button className="gap-2" data-testid="button-ask-question">
+            <Button 
+              className="gap-2" 
+              data-testid="button-ask-question"
+              onClick={() => user ? setCreateDialogOpen(true) : toast({ title: "Please login to ask a question", variant: "destructive" })}
+            >
               <Plus className="h-4 w-4" />
               Ask Question
             </Button>
@@ -32,6 +142,8 @@ export default function QAForum() {
                 placeholder="Search questions..."
                 className="pl-9"
                 data-testid="input-search-questions"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
           </div>
@@ -58,67 +170,75 @@ export default function QAForum() {
               </TabsList>
 
               <TabsContent value="recent" className="space-y-4 mt-6">
-                <QuestionCard
-                  id="1"
-                  title="Best practices for battery health in cold weather?"
-                  body="I live in Minnesota and winter is approaching. What are the best practices to maintain battery health during freezing temperatures? Should I precondition before every drive?"
-                  tags={["battery", "winter", "maintenance"]}
-                  author="Mike Johnson"
-                  timestamp="3h ago"
-                  upvotes={24}
-                  answers={7}
-                  isSolved={true}
-                />
-
-                <QuestionCard
-                  id="2"
-                  title="Charging to 80% vs 100% - does it really matter?"
-                  body="I've heard conflicting advice about charging limits. Some say always charge to 80%, others say 100% is fine for road trips. What's the science behind this?"
-                  tags={["charging", "battery", "longevity"]}
-                  author="Sarah Chen"
-                  timestamp="5h ago"
-                  upvotes={18}
-                  answers={12}
-                />
-
-                <QuestionCard
-                  id="3"
-                  title="Best route planning apps for long trips?"
-                  body="Planning my first cross-country trip in my EV. What apps do you recommend for route planning that includes charging stops?"
-                  tags={["road-trip", "apps", "planning"]}
-                  author="David Lee"
-                  timestamp="1d ago"
-                  upvotes={31}
-                  answers={15}
-                />
+                {isLoading ? (
+                  <div className="text-center py-8 text-muted-foreground">Loading questions...</div>
+                ) : recentQuestions && recentQuestions.length > 0 ? (
+                  recentQuestions.map((q) => (
+                    <QuestionCard
+                      key={q.id}
+                      id={q.id}
+                      title={q.title}
+                      body={q.body}
+                      tags={q.tags}
+                      author={q.author?.displayName || "Unknown"}
+                      timestamp={getTimeAgo(q.createdAt)}
+                      upvotes={q.upvotes.length}
+                      answers={q.answersCount}
+                      isSolved={!!q.solvedAnswerId}
+                      isUpvoted={user ? q.upvotes.includes(user.id) : false}
+                    />
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">No questions found</div>
+                )}
               </TabsContent>
 
               <TabsContent value="popular" className="space-y-4 mt-6">
-                <QuestionCard
-                  id="4"
-                  title="How to calculate real-world range vs EPA estimates?"
-                  body="The EPA range seems optimistic. What factors should I consider for real-world range calculations?"
-                  tags={["range", "efficiency"]}
-                  author="Emily Park"
-                  timestamp="2d ago"
-                  upvotes={45}
-                  answers={20}
-                  isSolved={true}
-                />
+                {isLoading ? (
+                  <div className="text-center py-8 text-muted-foreground">Loading questions...</div>
+                ) : popularQuestions && popularQuestions.length > 0 ? (
+                  popularQuestions.map((q) => (
+                    <QuestionCard
+                      key={q.id}
+                      id={q.id}
+                      title={q.title}
+                      body={q.body}
+                      tags={q.tags}
+                      author={q.author?.displayName || "Unknown"}
+                      timestamp={getTimeAgo(q.createdAt)}
+                      upvotes={q.upvotes.length}
+                      answers={q.answersCount}
+                      isSolved={!!q.solvedAnswerId}
+                      isUpvoted={user ? q.upvotes.includes(user.id) : false}
+                    />
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">No questions found</div>
+                )}
               </TabsContent>
 
               <TabsContent value="solved" className="space-y-4 mt-6">
-                <QuestionCard
-                  id="1"
-                  title="Best practices for battery health in cold weather?"
-                  body="I live in Minnesota and winter is approaching. What are the best practices to maintain battery health during freezing temperatures?"
-                  tags={["battery", "winter", "maintenance"]}
-                  author="Mike Johnson"
-                  timestamp="3h ago"
-                  upvotes={24}
-                  answers={7}
-                  isSolved={true}
-                />
+                {isLoading ? (
+                  <div className="text-center py-8 text-muted-foreground">Loading questions...</div>
+                ) : solvedQuestions && solvedQuestions.length > 0 ? (
+                  solvedQuestions.map((q) => (
+                    <QuestionCard
+                      key={q.id}
+                      id={q.id}
+                      title={q.title}
+                      body={q.body}
+                      tags={q.tags}
+                      author={q.author?.displayName || "Unknown"}
+                      timestamp={getTimeAgo(q.createdAt)}
+                      upvotes={q.upvotes.length}
+                      answers={q.answersCount}
+                      isSolved={!!q.solvedAnswerId}
+                      isUpvoted={user ? q.upvotes.includes(user.id) : false}
+                    />
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">No solved questions yet</div>
+                )}
               </TabsContent>
             </Tabs>
           </div>
@@ -130,8 +250,9 @@ export default function QAForum() {
                 {popularTags.map((tag) => (
                   <Badge
                     key={tag}
-                    variant="secondary"
+                    variant={selectedTag === tag ? "default" : "secondary"}
                     className="cursor-pointer hover-elevate"
+                    onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
                   >
                     {tag}
                   </Badge>
@@ -150,6 +271,59 @@ export default function QAForum() {
             </div>
           </div>
         </div>
+
+        {/* Create Question Dialog */}
+        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Ask a Question</DialogTitle>
+              <DialogDescription>
+                Get help from the EV community
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="question-title">Title *</Label>
+                <Input
+                  id="question-title"
+                  placeholder="What's your question?"
+                  value={newQuestion.title}
+                  onChange={(e) => setNewQuestion({ ...newQuestion, title: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="question-body">Details *</Label>
+                <Textarea
+                  id="question-body"
+                  placeholder="Provide more context and details..."
+                  value={newQuestion.body}
+                  onChange={(e) => setNewQuestion({ ...newQuestion, body: e.target.value })}
+                  rows={8}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="question-tags">Tags (comma-separated)</Label>
+                <Input
+                  id="question-tags"
+                  placeholder="e.g., battery, charging, maintenance"
+                  value={newQuestion.tags}
+                  onChange={(e) => setNewQuestion({ ...newQuestion, tags: e.target.value })}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateQuestion}
+                disabled={!newQuestion.title || !newQuestion.body}
+              >
+                Post Question
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

@@ -2,7 +2,10 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MapPin, Zap, Bookmark, Navigation } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 
 interface Connector {
   type: string;
@@ -18,7 +21,8 @@ interface StationCardProps {
   provider?: string;
   pricing?: string;
   availability?: "available" | "busy" | "offline";
-  isBookmarked?: boolean;
+  latitude?: number;
+  longitude?: number;
 }
 
 export function StationCard({
@@ -30,13 +34,96 @@ export function StationCard({
   provider,
   pricing,
   availability = "available",
-  isBookmarked = false,
+  latitude,
+  longitude,
 }: StationCardProps) {
-  const [bookmarked, setBookmarked] = useState(isBookmarked);
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [bookmarked, setBookmarked] = useState(false);
+
+  // Check if station is bookmarked
+  const { data: bookmark } = useQuery({
+    queryKey: [`/api/bookmarks/check`, user?.id, id],
+    queryFn: async () => {
+      if (!user) return null;
+      const res = await fetch(`/api/bookmarks/check?userId=${user.id}&targetId=${id}`, {
+        credentials: "include",
+      });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!user,
+  });
+
+  useEffect(() => {
+    setBookmarked(!!bookmark);
+  }, [bookmark]);
+
+  const bookmarkMutation = useMutation({
+    mutationFn: async () => {
+      if (bookmarked) {
+        // Delete bookmark
+        const res = await fetch(`/api/bookmarks/${bookmark.id}`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        if (!res.ok) throw new Error("Failed to remove bookmark");
+      } else {
+        // Create bookmark
+        const res = await fetch("/api/bookmarks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            targetType: "STATION",
+            targetId: id,
+            metadata: { name, address },
+          }),
+        });
+        if (!res.ok) throw new Error("Failed to bookmark");
+      }
+    },
+    onSuccess: () => {
+      setBookmarked(!bookmarked);
+      queryClient.invalidateQueries({ queryKey: [`/api/bookmarks/check`] });
+      toast({
+        title: bookmarked ? "Bookmark removed" : "Station bookmarked",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Failed to update bookmark",
+        variant: "destructive",
+      });
+    },
+  });
 
   const handleBookmark = () => {
-    setBookmarked(!bookmarked);
-    console.log(`Station ${id} bookmark toggled`);
+    if (!user) {
+      toast({
+        title: "Please login to bookmark stations",
+        variant: "destructive",
+      });
+      return;
+    }
+    bookmarkMutation.mutate();
+  };
+
+  const handleNavigate = () => {
+    if (latitude && longitude) {
+      // Open in Google Maps
+      window.open(
+        `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`,
+        "_blank"
+      );
+    } else {
+      // Fallback to address search
+      window.open(
+        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`,
+        "_blank"
+      );
+    }
   };
 
   const availabilityColor = {
@@ -88,6 +175,7 @@ export function StationCard({
               variant="outline"
               size="sm"
               className="flex-1"
+              onClick={handleNavigate}
               data-testid={`button-navigate-${id}`}
             >
               <Navigation className="h-3 w-3 mr-1" />
@@ -97,6 +185,7 @@ export function StationCard({
               variant={bookmarked ? "default" : "outline"}
               size="sm"
               onClick={handleBookmark}
+              disabled={bookmarkMutation.isPending}
               data-testid={`button-bookmark-${id}`}
             >
               <Bookmark className={`h-3 w-3 ${bookmarked ? 'fill-current' : ''}`} />
